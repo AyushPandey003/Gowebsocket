@@ -1,0 +1,4 @@
+node_modules/
+cmd/server/server.exe
+.cert
+.pem
