@@ -83,7 +83,7 @@ func main() {
 	// Start HTTP server in a goroutine
 	go func() {
 		log.Printf("HTTP server listening on port %s", cfg.Port)
-		serverErrors <- server.ListenAndServeTLS("cert.pem", "key.pem")
+		serverErrors <- server.ListenAndServe()
 	}()
 
 	// Channel to listen for interrupt signals
