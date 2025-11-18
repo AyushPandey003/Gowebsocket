@@ -61,13 +61,16 @@ type Hub struct {
 	// Storage for database operations
 	storage *storage.Storage
 
+	// Reference to manager for cleanup callbacks
+	manager *Manager
+
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
 // NewHub creates a new Hub instance
-func NewHub(config ContestConfig, pubsub *PubSub, store *storage.Storage) *Hub {
+func NewHub(config ContestConfig, pubsub *PubSub, store *storage.Storage, manager *Manager) *Hub {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Hub{
@@ -85,6 +88,7 @@ func NewHub(config ContestConfig, pubsub *PubSub, store *storage.Storage) *Hub {
 		timerRunning:         false,
 		pubsub:               pubsub,
 		storage:              store,
+		manager:              manager,
 		ctx:                  ctx,
 		cancel:               cancel,
 	}
@@ -660,7 +664,11 @@ func (h *Hub) endGame() {
 	go func() {
 		time.Sleep(5 * time.Minute)
 		log.Printf("Cleaning up hub for finished contest %s", h.Config.ContestID)
-		h.Shutdown()
+		if h.manager != nil {
+			h.manager.RemoveHub(h.Config.ContestID)
+		} else {
+			h.Shutdown()
+		}
 	}()
 }
 

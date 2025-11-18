@@ -40,13 +40,21 @@ func (m *Manager) CreateHub(config ContestConfig, pubsub *PubSub, store *storage
 	defer m.mu.Unlock()
 
 	// Check if hub already exists
-	if hub, exists := m.hubs[config.ContestID]; exists {
-		log.Printf("Hub for contest %s already exists", config.ContestID)
-		return hub
+	if existingHub, exists := m.hubs[config.ContestID]; exists {
+		// If the existing hub is finished, remove it and create a new one
+		// This prevents reusing finished hubs for new contests
+		if existingHub.GetGameState() == GameStateFinished {
+			log.Printf("Hub for contest %s exists but is finished, removing and creating new one", config.ContestID)
+			existingHub.Shutdown()
+			delete(m.hubs, config.ContestID)
+		} else {
+			log.Printf("Hub for contest %s already exists and is active", config.ContestID)
+			return existingHub
+		}
 	}
 
 	// Create new hub
-	hub := NewHub(config, pubsub, store)
+	hub := NewHub(config, pubsub, store, m)
 	m.hubs[config.ContestID] = hub
 
 	// Start the hub in a goroutine
@@ -113,16 +121,33 @@ func (m *Manager) loadHubFromDatabase(contestID string) *Hub {
 		Questions:       questions,
 	}
 
+	// Check contest status from database - don't load finished contests
+	var contestStatus string
+	query := `SELECT status FROM contest WHERE id = $1`
+	if err := m.storage.Pool().QueryRow(ctx, query, contestID).Scan(&contestStatus); err == nil {
+		if contestStatus == "finished" {
+			log.Printf("Contest %s is finished in database, not loading hub", contestID)
+			return nil
+		}
+	}
+
 	// Create the hub
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Double-check it wasn't created by another goroutine
-	if hub, exists := m.hubs[contestID]; exists {
-		return hub
+	if existingHub, exists := m.hubs[contestID]; exists {
+		// If existing hub is finished, remove it and create new one
+		if existingHub.GetGameState() == GameStateFinished {
+			log.Printf("Existing hub for contest %s is finished, removing and creating new one", contestID)
+			existingHub.Shutdown()
+			delete(m.hubs, contestID)
+		} else {
+			return existingHub
+		}
 	}
 
-	hub := NewHub(contestConfig, m.pubsub, m.storage)
+	hub := NewHub(contestConfig, m.pubsub, m.storage, m)
 	m.hubs[contestID] = hub
 
 	// Start the hub in a goroutine
