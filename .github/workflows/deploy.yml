@@ -1,0 +1,65 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate SSH reachability
+        env:
+          HOST: ${{ secrets.EC2_HOST }}
+          PORT: 22
+        run: |
+          echo "Checking SSH reachability to $HOST:$PORT"
+          timeout 10 bash -c "cat < /dev/null > /dev/tcp/$HOST/$PORT" && echo "SSH port is reachable" || {
+            echo "Cannot reach $HOST:$PORT from GitHub runner."
+            echo "Check EC2 Security Group/NACL/Route and ensure inbound TCP $PORT allows GitHub-hosted runners (or 0.0.0.0/0 temporarily for testing)."
+            exit 1
+          }
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          PORT: ${{ secrets.PORT }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_ADDR: ${{ secrets.REDIS_ADDR }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          REDIS_DB: ${{ secrets.REDIS_DB }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          QUESTION_TIMER: ${{ secrets.QUESTION_TIMER }}
+          MAX_PLAYERS: ${{ secrets.MAX_PLAYERS }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          timeout: 30s
+          command_timeout: 15m
+          script_stop: true
+          envs: PORT,DATABASE_URL,REDIS_ADDR,REDIS_PASSWORD,REDIS_DB,JWT_SECRET,QUESTION_TIMER,MAX_PLAYERS
+          script: |
+            cd /home/ec2-user/gowebsocket
+            git pull origin main
+
+            cat > .env <<EOF
+            PORT=${PORT}
+            DATABASE_URL=${DATABASE_URL}
+            REDIS_ADDR=${REDIS_ADDR}
+            REDIS_PASSWORD=${REDIS_PASSWORD}
+            REDIS_DB=${REDIS_DB}
+            JWT_SECRET=${JWT_SECRET}
+            QUESTION_TIMER=${QUESTION_TIMER}
+            MAX_PLAYERS=${MAX_PLAYERS}
+            EOF
+
+            go mod download
+            go build -o server ./cmd/server
+            sudo systemctl restart gowebsocket.service
